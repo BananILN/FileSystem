@@ -9,31 +9,32 @@ import (
 	"sort"
 )
 
-// Функция для рекурсивного обхода директории и сбора информации о файлах и папках
 func getFilesAndSizes(root string) ([]string, []int64, error) {
 	var files []string
-	var sizes []int64 
+	var sizes []int64
+
+	fmt.Printf("Scanning directory: %s\n", root)
 
 	err := filepath.Walk(root, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		// Игнорируем корневую директорию
+		// Пропускаем корневую директорию
 		if path == root {
 			return nil
 		}
 
-		// Добавляем информацию о файле/папке
-		files = append(files, path)
-		if info.IsDir() {
-			size, err := getDirSize(path)
-			if err != nil {
-				return err
+		// Проверяем, является ли файл или директория на первом уровне
+		if filepath.Dir(path) == root {
+			if info.IsDir() {
+				size := getDirSize(path) // Изменено на получение одного значения
+				files = append(files, path)
+				sizes = append(sizes, size)
+			} else {
+				files = append(files, path)
+				sizes = append(sizes, info.Size())
 			}
-			sizes = append(sizes, size)
-		} else {
-			sizes = append(sizes, info.Size())
 		}
 
 		return nil
@@ -41,27 +42,34 @@ func getFilesAndSizes(root string) ([]string, []int64, error) {
 
 	return files, sizes, err
 }
-	
-// Функция для вычисления размера директории
-func getDirSize(path string) (int64, error) {
+
+func getDirSize(path string) int64 {
 	var size int64
 
-	err := filepath.Walk(path, func(_ string, info fs.FileInfo, err error) error {
+	// Рекурсивно обходим все файлы и поддиректории.
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
-		} 
-		if !info.IsDir() {
+		}
+		if info.IsDir() {
+			// Для файлов добавляем их размер.
+			if info.Name() != filepath.Base(path){
+				size += info.Size()
+			}
+		} else{
 			size += info.Size()
 		}
 		return nil
 	})
+	if err != nil {
+		fmt.Println("ошибка при вычислении размера директории:", err)
+		return 0
+	}
 
-	return size, err
+	return size
 }
 
-// Функция для сортировки файлов и папок по размеру
 func sortFiles(files []string, sizes []int64, order string) {
-	// Создаем срез пар (путь, размер) для сортировки
 	type fileSize struct {
 		path string
 		size int64
@@ -71,7 +79,6 @@ func sortFiles(files []string, sizes []int64, order string) {
 		fileSizes = append(fileSizes, fileSize{files[i], sizes[i]})
 	}
 
-	// Сортируем
 	sort.Slice(fileSizes, func(i, j int) bool {
 		if order == "asc" {
 			return fileSizes[i].size < fileSizes[j].size
@@ -80,14 +87,12 @@ func sortFiles(files []string, sizes []int64, order string) {
 		}
 	})
 
-	// Обновляем исходные срезы
-	for i := range fileSizes {
+	for i := 0; i < len(fileSizes); i++ {
 		files[i] = fileSizes[i].path
 		sizes[i] = fileSizes[i].size
 	}
 }
 
-// Функция для конвертации размера в удобочитаемый формат
 func formatSize(size int64) string {
 	const (
 		KB = 1 << 10
@@ -107,58 +112,52 @@ func formatSize(size int64) string {
 	}
 }
 
-// Функция для вывода информации о файлах и папках
-func printFiles(files []string, sizes []int64) {
+func printFiles(files []string, sizes []int64) error {
+	if len(files) == 0 {
+		fmt.Println("No files or directories found.")
+		return nil
+	}
+
 	for i, file := range files {
 		info, err := os.Stat(file)
 		if err != nil {
 			fmt.Printf("Error getting info for %s: %s\n", file, err)
-			continue
+			return err
 		}
 
-		// Извлекаем только имя файла/папки
 		name := filepath.Base(file)
-
-		// Форматируем размер
 		sizeFormatted := formatSize(sizes[i])
 
-		// Выводим информацию
 		if info.IsDir() {
 			fmt.Printf("[DIR]  %s (%s)\n", name, sizeFormatted)
 		} else {
 			fmt.Printf("[FILE] %s (%s)\n", name, sizeFormatted)
 		}
 	}
+	return nil
 }
 
 func main() {
-	
 	root := flag.String("root", "", "choose a directory")
 	sortOrder := flag.String("sort", "asc", "choose sorting of directory (asc/desc)")
 	flag.Parse()
 
-	// Проверка, что директория указана
 	if *root == "" {
 		fmt.Println("Please specify a directory using the -root flag.")
 		return
 	}
 
-	// Проверка, что директория существует
 	if _, err := os.Stat(*root); os.IsNotExist(err) {
 		fmt.Println("Directory does not exist.")
 		return
 	}
 
-	// Получаем список файлов и папок
 	files, sizes, err := getFilesAndSizes(*root)
 	if err != nil {
 		fmt.Printf("Error walking the directory: %s\n", err)
 		return
 	}
 
-	// Сортируем файлы и папки по размеру
 	sortFiles(files, sizes, *sortOrder)
-
-	// Выводим результат
 	printFiles(files, sizes)
 }
